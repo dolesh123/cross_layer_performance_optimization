@@ -1,0 +1,117 @@
+# docker-compose.yml - Full Multi-Container Orchestration for IMPOF Platform
+version: '3.8'
+
+services:
+  # 1. PostgreSQL Relational Store
+  postgres:
+    image: postgres:16-alpine
+    container_name: impof-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: impof_platform
+      POSTGRES_USER: impof_user
+      POSTGRES_PASSWORD: impof_secure_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - impof-network
+
+  # 2. Redis Distributed Cache
+  redis:
+    image: redis:7.2-alpine
+    container_name: impof-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    networks:
+      - impof-network
+
+  # 3. Prometheus Metrics Collector
+  prometheus:
+    image: prom/prometheus:v2.50.0
+    container_name: impof-prometheus
+    restart: unless-stopped
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    networks:
+      - impof-network
+
+  # 4. Python FastAPI Analysis & AI Anomaly Engine
+  analysis-engine:
+    build:
+      context: ./analysis-engine
+      dockerfile: Dockerfile
+    container_name: impof-analysis-engine
+    restart: unless-stopped
+    environment:
+      - PORT=8000
+    ports:
+      - "8000:8000"
+    depends_on:
+      - prometheus
+    networks:
+      - impof-network
+
+  # 5. Core Platform Backend (Node.js/Express)
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: impof-backend
+    restart: unless-stopped
+    environment:
+      - PORT=5000
+      - JWT_SECRET=impof_dev_super_secret_jwt_key_2026
+      - DATABASE_URL=postgres://impof_user:impof_secure_password@postgres:5432/impof_platform
+      - REDIS_URL=redis://redis:6379
+      - ANALYSIS_ENGINE_URL=http://analysis-engine:8000
+    ports:
+      - "5000:5000"
+    depends_on:
+      - postgres
+      - redis
+      - analysis-engine
+    networks:
+      - impof-network
+
+  # 6. DevOps React Dashboard (Vite/React)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: impof-frontend
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+    networks:
+      - impof-network
+
+  # 7. Monitored Demo Application ("Movie Recommendation System")
+  demo-app:
+    build:
+      context: ./demo-app/backend
+      dockerfile: Dockerfile
+    container_name: impof-demo-app
+    restart: unless-stopped
+    environment:
+      - PORT=4000
+      - PLATFORM_INGEST_URL=http://backend:5000/api/metrics/ingest
+    ports:
+      - "4000:4000"
+    depends_on:
+      - redis
+    networks:
+      - impof-network
+
+networks:
+  impof-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
